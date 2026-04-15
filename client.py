@@ -137,9 +137,13 @@ class HeyBoxClient:
             images = []
             for img in imgs:
                 if isinstance(img, dict):
-                    images.append(img.get("url", img.get("thumb", "")))
+                    url = img.get("url", img.get("thumb", ""))
                 elif isinstance(img, str):
-                    images.append(img)
+                    url = img
+                else:
+                    continue
+                if url:
+                    images.append(_to_original_url(url))
 
             hashtags = item.get("hashtags", item.get("tags", []))
             tags = []
@@ -164,3 +168,19 @@ class HeyBoxClient:
             )
         except Exception:
             return None
+
+
+def _to_original_url(url: str) -> str:
+    """将缩略图 URL 转换为原图 URL
+
+    缩略图: .../hash/thumb.jpeg?imageMogr2/...  或  .../hash/format.jpeg?...
+    原图:   .../hash.jpeg
+    """
+    import re
+    # 去掉查询参数
+    clean = url.split("?")[0]
+    # /hash/thumb.xxx 或 /hash/format.xxx -> /hash.jpeg
+    m = re.match(r"(https?://.+?/\w+)/(?:thumb|format)\.\w+", clean)
+    if m:
+        return m.group(1) + ".jpeg"
+    return clean

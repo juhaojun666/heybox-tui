@@ -7,6 +7,7 @@
   n/p  - 下一页/上一页
   r    - 刷新
   Enter - 查看帖子详情
+  o    - 打开图片(在详情页)
   Esc  - 返回列表
   q    - 退出
 """
@@ -14,6 +15,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+import os
+import sys
+import tempfile
+from pathlib import Path
 
 from rich.text import Text
 from textual import work
@@ -80,7 +85,7 @@ class PostDetail(VerticalScroll):
         if content:
             self.mount(Static(Text(f"\n{content}\n")))
         if post.images:
-            self.mount(Static(Text("📷 图片:", style="cyan")))
+            self.mount(Static(Text(f"📷 图片 ({len(post.images)}张, 按 o 打开):", style="cyan")))
             for url in post.images:
                 self.mount(Static(Text(f"  {url}", style="blue")))
         self.mount(Static(Text("\n按 Esc 返回列表", style="dim italic")))
@@ -142,6 +147,7 @@ class HeyBoxApp(App):
         Binding("2", "tab_latest", "最新"),
         Binding("n", "next_page", "下一页"),
         Binding("p", "prev_page", "上一页"),
+        Binding("o", "open_images", "图片"),
         Binding("esc", "go_back", "返回"),
     ]
 
@@ -154,6 +160,7 @@ class HeyBoxApp(App):
         self._all_posts: list[Post] = []
         self._offset = 0
         self._page_size = 10
+        self._current_post: Post | None = None
 
     def on_mount(self) -> None:
         self.sub_title = f"heybox-tui {'[已登录]' if self.client.is_logged_in else '[未登录]'}"
@@ -173,6 +180,7 @@ class HeyBoxApp(App):
                     "  n/p    下一页/上一页\n"
                     "  r      刷新\n"
                     "  Enter  查看详情\n"
+                    "  o      打开图片\n"
                     "  Esc    返回列表\n"
                     "  q      退出\n\n"
                     f"{'已登录 ✓ 配置: ~/.heybox-tui/config.json' if self.client.is_logged_in else '未登录 — 配置 ~/.heybox-tui/config.json 可获得个性化推荐'}",
@@ -208,6 +216,7 @@ class HeyBoxApp(App):
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, PostItem):
+            self._current_post = event.item.post
             self.query_one("#detail", PostDetail).show_post(event.item.post)
 
     def action_tab_recommend(self) -> None:
@@ -234,6 +243,35 @@ class HeyBoxApp(App):
 
     def action_go_back(self) -> None:
         self.query_one("#post-list", ListView).focus()
+
+    @work(thread=True)
+    async def action_open_images(self) -> None:
+        """下载并打开当前帖子的图片"""
+        post = self._current_post
+        if not post or not post.images:
+            self.call_from_thread(self._show_error, "当前帖子没有图片")
+            return
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="heybox_"))
+        import httpx
+        dl_client = httpx.Client(timeout=30.0, verify=False, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://www.xiaoheihe.cn/",
+        })
+        for i, url in enumerate(post.images):
+            try:
+                resp = dl_client.get(url)
+                ext = ".jpg" if "jpeg" in url or "jpg" in url else ".png"
+                img_path = tmp_dir / f"{i}{ext}"
+                img_path.write_bytes(resp.content)
+            except Exception:
+                pass
+
+        # 用系统默认程序打开图片
+        if os.name == "nt":
+            os.startfile(str(tmp_dir))
+        elif os.name == "posix":
+            os.system(f"open '{tmp_dir}'" if sys.platform == "darwin" else f"xdg-open '{tmp_dir}'")
 
     @work(exclusive=True, thread=True)
     async def _load_posts(self, append: bool = False) -> None:

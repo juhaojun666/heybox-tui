@@ -8,23 +8,38 @@ from pathlib import Path
 CONFIG_DIR = Path.home() / ".heybox-tui"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
+_DEFAULT_CONFIG = {
+    "heybox_id": "",
+    "pkey": "",
+}
+
+
+def _ensure_config() -> None:
+    """首次运行时创建示例配置文件"""
+    if CONFIG_FILE.exists():
+        return
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.write_text(
+        json.dumps(_DEFAULT_CONFIG, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
 
 def load_config() -> dict:
-    if CONFIG_FILE.exists():
-        try:
-            return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {}
+    _ensure_config()
+    try:
+        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return dict(_DEFAULT_CONFIG)
 
 
 def save_config(cfg: dict) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def get_credential() -> dict:
-    """获取登录凭证，返回 {heybox_id, pkey, ...}"""
+    """获取登录凭证，返回 {heybox_id, pkey}"""
     cfg = load_config()
     return {
         "heybox_id": cfg.get("heybox_id", ""),
