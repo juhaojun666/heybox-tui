@@ -123,22 +123,20 @@ class ImageViewer:
             return
 
         self._info_var.set(f"加载中... ({self._index + 1}/{len(self._images)})")
-        # 在子线程下载，完成后回调主线程渲染
         url = self._images[self._index]
-        threading.Thread(target=self._fetch_and_render, args=(url,), daemon=True).start()
+        threading.Thread(target=self._fetch, args=(url,), daemon=True).start()
 
-    def _fetch_and_render(self, url: str) -> None:
-        """子线程：下载图片，解码为 PhotoImage，再切回主线程显示"""
+    def _fetch(self, url: str) -> None:
+        """子线程：下载 + PIL 缩放，传 Image 对象回主线程创建 PhotoImage"""
         data = download_image(url)
         if data is None:
             self.root.after(0, lambda: self._info_var.set("图片加载失败"))
             return
 
         try:
-            from PIL import Image, ImageTk
+            from PIL import Image
 
             img = Image.open(BytesIO(data))
-            # 缩放
             cw = self._canvas.winfo_width() or 400
             ch = self._canvas.winfo_height() or 360
             iw, ih = img.size
@@ -146,28 +144,45 @@ class ImageViewer:
             new_w = max(1, int(iw * scale))
             new_h = max(1, int(ih * scale))
             img_resized = img.resize((new_w, new_h))
-            photo = ImageTk.PhotoImage(img_resized)
+            # 传回主线程创建 PhotoImage（tkinter 要求主线程创建）
+            self.root.after(0, lambda: self._render_pil(img_resized))
         except ImportError:
+            # 没有 Pillow，保存到临时文件用 PhotoImage(file=) 加载
             try:
-                photo = tk.PhotoImage(data=data)
-            except Exception:
-                self.root.after(0, lambda: self._info_var.set("请安装 Pillow: pip install Pillow"))
+                tmp = Path(tempfile.mkdtemp(prefix="heybox_")) / "img.gif"
+                from PIL import Image as _I  # noqa: re-check
+            except ImportError:
+                # 真的没 Pillow，试试原生
+                tmp = Path(tempfile.mkdtemp(prefix="heybox_")) / "img.png"
+                # urllib 下载的 data 直接写文件，PhotoImage 可能不支持
+                tmp.write_bytes(data)
+                self.root.after(0, lambda: self._render_file(str(tmp)))
                 return
         except Exception:
             self.root.after(0, lambda: self._info_var.set("图片解码失败"))
-            return
 
-        # 切回主线程渲染
-        self.root.after(0, lambda: self._render(photo))
+    def _render_pil(self, img) -> None:
+        """主线程：从 PIL Image 创建 PhotoImage 并显示"""
+        from PIL import ImageTk
 
-    def _render(self, photo) -> None:
-        """主线程：把 PhotoImage 挂到 Canvas 上"""
-        self._photo = photo  # 防 GC
+        self._photo = ImageTk.PhotoImage(img)
         self._canvas.delete("all")
         cw = self._canvas.winfo_width() or 400
         ch = self._canvas.winfo_height() or 360
         self._canvas.create_image(cw // 2, ch // 2, anchor="center", image=self._photo)
         self._info_var.set(f"📷 {self._index + 1}/{len(self._images)}  ← → 切换")
+
+    def _render_file(self, path: str) -> None:
+        """主线程：从文件创建 PhotoImage 并显示"""
+        try:
+            self._photo = tk.PhotoImage(file=path)
+            self._canvas.delete("all")
+            cw = self._canvas.winfo_width() or 400
+            ch = self._canvas.winfo_height() or 360
+            self._canvas.create_image(cw // 2, ch // 2, anchor="center", image=self._photo)
+            self._info_var.set(f"📷 {self._index + 1}/{len(self._images)}  ← → 切换")
+        except Exception:
+            self._info_var.set("请安装 Pillow: pip install Pillow")
 
     # ─── 控制按钮 ───
 
