@@ -14,6 +14,26 @@ pip install -r requirements.txt
 python app.py
 ```
 
+## 登录配置（可选）
+
+登录后可获得个性化推荐帖子。编辑配置文件 `~/.heybox-tui/config.json`：
+
+```json
+{
+  "heybox_id": "你的小黑盒用户ID",
+  "pkey": "你的pkey"
+}
+```
+
+### 获取 heybox_id 和 pkey
+
+1. 在浏览器中打开 [小黑盒](https://www.xiaoheihe.cn/) 并登录
+2. 按 F12 打开开发者工具，切换到 Network（网络）标签
+3. 刷新页面，找到任意请求 `api.xiaoheihe.cn` 的请求
+4. 在请求参数中复制 `heybox_id` 和 `pkey` 的值
+
+> 不配置也能用，只是看不到个性化推荐内容。
+
 ## 快捷键
 
 | 按键 | 功能 |

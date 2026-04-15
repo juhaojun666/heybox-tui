@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import httpx
 import urllib3
 
+from config import get_credential
 from hkey import build_request_url
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -35,12 +36,15 @@ class HeyBoxClient:
     - feeds: 动态流 (pull=0 推荐, pull=1 最新, 支持分页)
     - topic_categories: 话题分类
 
-    暂不可用:
-    - link_tree: 帖子详情 (触发验证码)
-    - comment_list: 评论列表 (接口已变更)
+    登录后可获得个性化推荐，在 ~/.heybox-tui/config.json 中配置:
+    - heybox_id: 小黑盒用户 ID
+    - pkey: 认证密钥
     """
 
     def __init__(self) -> None:
+        cred = get_credential()
+        self._heybox_id = cred["heybox_id"]
+        self._pkey = cred["pkey"]
         self._client = httpx.Client(
             timeout=15.0,
             verify=False,
@@ -54,6 +58,10 @@ class HeyBoxClient:
         self._min_interval = 1.0
         self._max_retries = 3
 
+    @property
+    def is_logged_in(self) -> bool:
+        return bool(self._heybox_id and self._pkey)
+
     def _throttle(self) -> None:
         elapsed = time.time() - self._last_request_time
         if elapsed < self._min_interval:
@@ -61,7 +69,9 @@ class HeyBoxClient:
         self._last_request_time = time.time()
 
     def _get(self, route: str, params: dict | None = None) -> dict:
-        url = build_request_url(route, params)
+        url = build_request_url(
+            route, params, heybox_id=self._heybox_id, pkey=self._pkey
+        )
         last_error = None
         for attempt in range(self._max_retries):
             self._throttle()

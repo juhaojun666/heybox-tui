@@ -24,6 +24,7 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
 
 from client import HeyBoxClient, Post
+from config import get_credential, is_logged_in, save_config
 
 
 def format_time(ts: int) -> str:
@@ -154,6 +155,9 @@ class HeyBoxApp(App):
         self._offset = 0
         self._page_size = 10
 
+    def on_mount(self) -> None:
+        self.sub_title = f"heybox-tui {'[已登录]' if self.client.is_logged_in else '[未登录]'}"
+
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal():
@@ -170,7 +174,8 @@ class HeyBoxApp(App):
                     "  r      刷新\n"
                     "  Enter  查看详情\n"
                     "  Esc    返回列表\n"
-                    "  q      退出",
+                    "  q      退出\n\n"
+                    f"{'已登录 ✓ 配置: ~/.heybox-tui/config.json' if self.client.is_logged_in else '未登录 — 配置 ~/.heybox-tui/config.json 可获得个性化推荐'}",
                     classes="placeholder",
                 )
         yield Footer()
