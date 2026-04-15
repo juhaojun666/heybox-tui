@@ -6,8 +6,11 @@ import time
 from dataclasses import dataclass, field
 
 import httpx
+import urllib3
 
 from hkey import build_request_url
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 @dataclass
@@ -40,6 +43,7 @@ class HeyBoxClient:
     def __init__(self) -> None:
         self._client = httpx.Client(
             timeout=15.0,
+            verify=False,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Referer": "https://www.xiaoheihe.cn/",
@@ -48,6 +52,7 @@ class HeyBoxClient:
         )
         self._last_request_time = 0.0
         self._min_interval = 1.0
+        self._max_retries = 3
 
     def _throttle(self) -> None:
         elapsed = time.time() - self._last_request_time
@@ -56,17 +61,25 @@ class HeyBoxClient:
         self._last_request_time = time.time()
 
     def _get(self, route: str, params: dict | None = None) -> dict:
-        self._throttle()
         url = build_request_url(route, params)
-        resp = self._client.get(url)
-        resp.raise_for_status()
-        data = resp.json()
-        status = data.get("status")
-        if status == "show_captcha":
-            raise RuntimeError("触发验证码，请稍后再试")
-        if status != "ok":
-            raise RuntimeError(f"API 错误: status={status}, msg={data.get('msg', '')}")
-        return data.get("result", data)
+        last_error = None
+        for attempt in range(self._max_retries):
+            self._throttle()
+            try:
+                resp = self._client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+                status = data.get("status")
+                if status == "show_captcha":
+                    raise RuntimeError("触发验证码，请稍后再试")
+                if status != "ok":
+                    raise RuntimeError(f"API 错误: status={status}, msg={data.get('msg', '')}")
+                return data.get("result", data)
+            except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+                last_error = e
+                if attempt < self._max_retries - 1:
+                    time.sleep(2 * (attempt + 1))
+        raise RuntimeError(f"连接失败，重试 {self._max_retries} 次后仍报错: {last_error}")
 
     def get_feeds(self, offset: int = 0, pull: int = 0) -> tuple[list[Post], int]:
         """获取动态流帖子列表

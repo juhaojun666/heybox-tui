@@ -230,7 +230,7 @@ class HeyBoxApp(App):
     def action_go_back(self) -> None:
         self.query_one("#post-list", ListView).focus()
 
-    @work(exclusive=True)
+    @work(exclusive=True, thread=True)
     async def _load_posts(self, append: bool = False) -> None:
         if self.is_loading:
             return
