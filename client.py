@@ -27,6 +27,7 @@ class Post:
     create_time: int
     images: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    viewer_images: list[str] = field(default_factory=list)
 
 
 class HeyBoxClient:
@@ -165,6 +166,7 @@ class HeyBoxClient:
                 create_time=item.get("create_at", item.get("create_time", 0)),
                 images=images,
                 tags=tags,
+                viewer_images=[_to_viewer_url(u) for u in images],
             )
         except Exception:
             return None
@@ -177,10 +179,18 @@ def _to_original_url(url: str) -> str:
     原图:   .../hash.jpeg
     """
     import re
-    # 去掉查询参数
     clean = url.split("?")[0]
-    # /hash/thumb.xxx 或 /hash/format.xxx -> /hash.jpeg
     m = re.match(r"(https?://.+?/\w+)/(?:thumb|format)\.\w+", clean)
     if m:
         return m.group(1) + ".jpeg"
     return clean
+
+
+def _to_viewer_url(url: str) -> str:
+    """将图片 URL 转换为适合查看器尺寸的 CDN 缩放 URL
+
+    利用小黑盒 CDN 的 imageMogr2 参数，直接请求 500px 宽的图，
+    避免下载 5MB 原图再本地缩放。
+    """
+    original = _to_original_url(url)
+    return f"{original}?imageMogr2/thumbnail/500x/strip/quality/85"

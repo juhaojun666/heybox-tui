@@ -13,7 +13,6 @@ import json
 import os
 import tempfile
 import threading
-import time
 from io import BytesIO
 from pathlib import Path
 from urllib.request import urlopen, Request
@@ -23,6 +22,11 @@ import tkinter as tk
 STATE_FILE = Path(tempfile.gettempdir()) / "heybox_viewer_state.json"
 LOCK_FILE = Path(tempfile.gettempdir()) / "heybox_viewer.lock"
 POLL_INTERVAL = 0.5
+
+# 内存缓存：url -> PIL Image
+_cache: dict[str, object] = {}
+_cache_order: list[str] = []
+_CACHE_MAX = 20
 
 
 def load_state() -> dict:
@@ -41,10 +45,24 @@ def download_image(url: str) -> bytes | None:
                 "Referer": "https://www.xiaoheihe.cn/",
             },
         )
-        with urlopen(req, timeout=15) as resp:
+        with urlopen(req, timeout=10) as resp:
             return resp.read()
     except Exception:
         return None
+
+
+def _cache_put(url: str, img) -> None:
+    if url in _cache:
+        return
+    _cache[url] = img
+    _cache_order.append(url)
+    while len(_cache_order) > _CACHE_MAX:
+        old = _cache_order.pop(0)
+        _cache.pop(old, None)
+
+
+def _cache_get(url: str):
+    return _cache.get(url)
 
 
 class ImageViewer:
@@ -57,6 +75,7 @@ class ImageViewer:
         self.root.minsize(200, 200)
 
         self._images: list[str] = []
+        self._originals: list[str] = []
         self._index = 0
         self._photo = None
         self._last_hash = ""
@@ -100,11 +119,9 @@ class ImageViewer:
         # 写锁文件标记进程存活
         LOCK_FILE.write_text(str(os.getpid()), encoding="utf-8")
 
-        # 用 root.after 做轮询，避免线程问题
         self._poll()
 
     def _on_close(self) -> None:
-        """关闭窗口时清理锁文件"""
         try:
             LOCK_FILE.unlink(missing_ok=True)
         except Exception:
@@ -120,6 +137,7 @@ class ImageViewer:
             if img_hash and img_hash != self._last_hash:
                 self._last_hash = img_hash
                 self._images = state.get("images", [])
+                self._originals = state.get("originals", self._images)
                 self._index = 0
                 self._show_current()
         except Exception:
@@ -135,12 +153,19 @@ class ImageViewer:
             self._photo = None
             return
 
-        self._info_var.set(f"加载中... ({self._index + 1}/{len(self._images)})")
         url = self._images[self._index]
+
+        # 缓存命中，直接渲染
+        cached = _cache_get(url)
+        if cached is not None:
+            self._render_pil(cached)
+            return
+
+        self._info_var.set(f"加载中... ({self._index + 1}/{len(self._images)})")
         threading.Thread(target=self._fetch, args=(url,), daemon=True).start()
 
     def _fetch(self, url: str) -> None:
-        """子线程：下载 + PIL 缩放，传 Image 对象回主线程创建 PhotoImage"""
+        """子线程：下载 + PIL 缩放，传 Image 对象回主线程"""
         data = download_image(url)
         if data is None:
             self.root.after(0, lambda: self._info_var.set("图片加载失败"))
@@ -150,32 +175,25 @@ class ImageViewer:
             from PIL import Image
 
             img = Image.open(BytesIO(data))
+            # CDN 已缩放到 500px 宽，这里只做适配窗口的微调
             cw = self._canvas.winfo_width() or 400
             ch = self._canvas.winfo_height() or 360
             iw, ih = img.size
             scale = min(cw / iw, ch / ih, 1.0)
-            new_w = max(1, int(iw * scale))
-            new_h = max(1, int(ih * scale))
-            img_resized = img.resize((new_w, new_h))
-            # 传回主线程创建 PhotoImage（tkinter 要求主线程创建）
-            self.root.after(0, lambda: self._render_pil(img_resized))
+            if scale < 0.95:
+                new_w = max(1, int(iw * scale))
+                new_h = max(1, int(ih * scale))
+                img = img.resize((new_w, new_h))
+            _cache_put(url, img)
+            self.root.after(0, lambda: self._render_pil(img))
         except ImportError:
-            # 没有 Pillow，保存到临时文件用 PhotoImage(file=) 加载
-            try:
-                tmp = Path(tempfile.mkdtemp(prefix="heybox_")) / "img.gif"
-                from PIL import Image as _I  # noqa: re-check
-            except ImportError:
-                # 真的没 Pillow，试试原生
-                tmp = Path(tempfile.mkdtemp(prefix="heybox_")) / "img.png"
-                # urllib 下载的 data 直接写文件，PhotoImage 可能不支持
-                tmp.write_bytes(data)
-                self.root.after(0, lambda: self._render_file(str(tmp)))
-                return
+            tmp = Path(tempfile.mkdtemp(prefix="heybox_")) / "img.png"
+            tmp.write_bytes(data)
+            self.root.after(0, lambda: self._render_file(str(tmp)))
         except Exception:
             self.root.after(0, lambda: self._info_var.set("图片解码失败"))
 
     def _render_pil(self, img) -> None:
-        """主线程：从 PIL Image 创建 PhotoImage 并显示"""
         from PIL import ImageTk
 
         self._photo = ImageTk.PhotoImage(img)
@@ -186,7 +204,6 @@ class ImageViewer:
         self._info_var.set(f"📷 {self._index + 1}/{len(self._images)}  ← → 切换")
 
     def _render_file(self, path: str) -> None:
-        """主线程：从文件创建 PhotoImage 并显示"""
         try:
             self._photo = tk.PhotoImage(file=path)
             self._canvas.delete("all")
@@ -212,11 +229,11 @@ class ImageViewer:
     def _open_in_system(self) -> None:
         if not self._images:
             return
-        url = self._images[self._index]
+        # 用原图 URL
+        url = self._originals[self._index] if self._originals else self._images[self._index]
         threading.Thread(target=self._download_and_open, args=(url,), daemon=True).start()
 
     def _download_and_open(self, url: str) -> None:
-        """子线程：下载图片并用系统查看器打开"""
         data = download_image(url)
         if not data:
             return

@@ -39,7 +39,8 @@ VIEWER_STATE_FILE = Path(tempfile.gettempdir()) / "heybox_viewer_state.json"
 def _notify_viewer(post: Post) -> None:
     """通知图片查看器更新，如果没在运行则启动"""
     state = {
-        "images": post.images,
+        "images": post.viewer_images or post.images,
+        "originals": post.images,
         "title": post.title,
         "hash": hashlib.md5(post.id.encode()).hexdigest(),
     }
