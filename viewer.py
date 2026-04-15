@@ -50,7 +50,7 @@ class ImageViewer:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("heybox 图片")
-        self.root.geometry("420x440-10+10")
+        self.root.geometry("420x440-10-40")
         self.root.attributes("-topmost", True)
         self.root.configure(bg="#1e1e1e")
         self.root.minsize(200, 200)
