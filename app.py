@@ -203,6 +203,9 @@ class HeyBoxApp(App):
 
     def __init__(self) -> None:
         super().__init__()
+        # 确保配置文件存在
+        from config import load_config
+        load_config()
         self.client = HeyBoxClient()
         self._all_posts: list[Post] = []
         self._offset = 0
@@ -229,8 +232,7 @@ class HeyBoxApp(App):
                     "  Enter  查看详情\n"
                     "  Esc    返回列表\n"
                     "  q      退出\n\n"
-                    "提示: 运行 python viewer.py 可打开配套图片查看器\n\n"
-                    f"{'已登录 ✓' if self.client.is_logged_in else '未登录 — 配置 ~/.heybox-tui/config.json 可获得个性化推荐'}",
+                    f"{'已登录 ✓' if self.client.is_logged_in else '未登录 — 编辑 ~/.heybox-tui/config.json 可获得个性化推荐'}",
                     classes="placeholder",
                 )
         yield Footer()
