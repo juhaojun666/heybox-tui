@@ -2,22 +2,23 @@
 
 在终端中浏览小黑盒社区帖子，摸鱼神器。
 
+配合 viewer.py 使用：TUI 切帖子时，图片查看器自动更新。
+
 快捷键:
   1/2  - 切换 推荐/最新
   n/p  - 下一页/上一页
   r    - 刷新
   Enter - 查看帖子详情
-  o    - 打开图片(在详情页)
   Esc  - 返回列表
   q    - 退出
 """
 
 from __future__ import annotations
 
-from datetime import datetime
-import os
-import sys
+import hashlib
+import json
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 from rich.text import Text
@@ -30,6 +31,19 @@ from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
 
 from client import HeyBoxClient, Post
 from config import get_credential, is_logged_in, save_config
+
+# 与 viewer.py 共享的状态文件
+VIEWER_STATE_FILE = Path(tempfile.gettempdir()) / "heybox_viewer_state.json"
+
+
+def _notify_viewer(post: Post) -> None:
+    """通知图片查看器更新"""
+    state = {
+        "images": post.images,
+        "title": post.title,
+        "hash": hashlib.md5(post.id.encode()).hexdigest(),
+    }
+    VIEWER_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
 
 def format_time(ts: int) -> str:
@@ -85,9 +99,7 @@ class PostDetail(VerticalScroll):
         if content:
             self.mount(Static(Text(f"\n{content}\n")))
         if post.images:
-            self.mount(Static(Text(f"📷 图片 ({len(post.images)}张, 按 o 打开):", style="cyan")))
-            for url in post.images:
-                self.mount(Static(Text(f"  {url}", style="blue")))
+            self.mount(Static(Text(f"📷 {len(post.images)}张图片 (查看器自动显示)", style="cyan")))
         self.mount(Static(Text("\n按 Esc 返回列表", style="dim italic")))
         self.scroll_home(animate=False)
 
@@ -147,7 +159,6 @@ class HeyBoxApp(App):
         Binding("2", "tab_latest", "最新"),
         Binding("n", "next_page", "下一页"),
         Binding("p", "prev_page", "上一页"),
-        Binding("o", "open_images", "图片"),
         Binding("esc", "go_back", "返回"),
     ]
 
@@ -180,10 +191,10 @@ class HeyBoxApp(App):
                     "  n/p    下一页/上一页\n"
                     "  r      刷新\n"
                     "  Enter  查看详情\n"
-                    "  o      打开图片\n"
                     "  Esc    返回列表\n"
                     "  q      退出\n\n"
-                    f"{'已登录 ✓ 配置: ~/.heybox-tui/config.json' if self.client.is_logged_in else '未登录 — 配置 ~/.heybox-tui/config.json 可获得个性化推荐'}",
+                    "提示: 运行 python viewer.py 可打开配套图片查看器\n\n"
+                    f"{'已登录 ✓' if self.client.is_logged_in else '未登录 — 配置 ~/.heybox-tui/config.json 可获得个性化推荐'}",
                     classes="placeholder",
                 )
         yield Footer()
@@ -218,6 +229,7 @@ class HeyBoxApp(App):
         if isinstance(event.item, PostItem):
             self._current_post = event.item.post
             self.query_one("#detail", PostDetail).show_post(event.item.post)
+            _notify_viewer(event.item.post)
 
     def action_tab_recommend(self) -> None:
         self.current_tab = "recommend"
@@ -243,35 +255,6 @@ class HeyBoxApp(App):
 
     def action_go_back(self) -> None:
         self.query_one("#post-list", ListView).focus()
-
-    @work(thread=True)
-    async def action_open_images(self) -> None:
-        """下载并打开当前帖子的图片"""
-        post = self._current_post
-        if not post or not post.images:
-            self.call_from_thread(self._show_error, "当前帖子没有图片")
-            return
-
-        tmp_dir = Path(tempfile.mkdtemp(prefix="heybox_"))
-        import httpx
-        dl_client = httpx.Client(timeout=30.0, verify=False, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://www.xiaoheihe.cn/",
-        })
-        for i, url in enumerate(post.images):
-            try:
-                resp = dl_client.get(url)
-                ext = ".jpg" if "jpeg" in url or "jpg" in url else ".png"
-                img_path = tmp_dir / f"{i}{ext}"
-                img_path.write_bytes(resp.content)
-            except Exception:
-                pass
-
-        # 用系统默认程序打开图片
-        if os.name == "nt":
-            os.startfile(str(tmp_dir))
-        elif os.name == "posix":
-            os.system(f"open '{tmp_dir}'" if sys.platform == "darwin" else f"xdg-open '{tmp_dir}'")
 
     @work(exclusive=True, thread=True)
     async def _load_posts(self, append: bool = False) -> None:

@@ -11,8 +11,16 @@ pip install -r requirements.txt
 ## 运行
 
 ```bash
+# 启动 TUI
 python app.py
+
+# 另开一个终端，启动图片查看器（可选）
+python viewer.py
 ```
+
+TUI 和图片查看器联动：在 TUI 中切换帖子时，图片查看器会自动显示对应图片。
+
+> 图片查看器支持 `←` `→` 键切换图片，按 `Esc` 关闭。建议安装 Pillow 以获得更好的图片显示：`pip install Pillow`
 
 ## 登录配置（可选）
 
