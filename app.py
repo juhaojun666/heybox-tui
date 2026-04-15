@@ -37,13 +37,49 @@ VIEWER_STATE_FILE = Path(tempfile.gettempdir()) / "heybox_viewer_state.json"
 
 
 def _notify_viewer(post: Post) -> None:
-    """通知图片查看器更新"""
+    """通知图片查看器更新，如果没在运行则启动"""
     state = {
         "images": post.images,
         "title": post.title,
         "hash": hashlib.md5(post.id.encode()).hexdigest(),
     }
     VIEWER_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+    # 检查 viewer 是否还在运行，不在则重启
+    if post.images:
+        _ensure_viewer_running()
+
+
+def _ensure_viewer_running() -> None:
+    """确保 viewer 进程在运行"""
+    import subprocess
+    import sys
+
+    # 用锁定文件检测 viewer 是否存活
+    lock_file = Path(tempfile.gettempdir()) / "heybox_viewer.lock"
+    if lock_file.exists():
+        try:
+            pid = int(lock_file.read_text().strip())
+            # 检查进程是否还在
+            import os
+            try:
+                os.kill(pid, 0)
+                return  # 进程还活着
+            except (OSError, ProcessLookupError):
+                pass
+        except (ValueError, OSError):
+            pass
+
+    # viewer 没在运行，启动它
+    viewer_path = Path(__file__).parent / "viewer.py"
+    if viewer_path.exists():
+        try:
+            subprocess.Popen(
+                [sys.executable, str(viewer_path)],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception:
+            pass
 
 
 def format_time(ts: int) -> str:

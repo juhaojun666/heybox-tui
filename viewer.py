@@ -21,6 +21,7 @@ from urllib.request import urlopen, Request
 import tkinter as tk
 
 STATE_FILE = Path(tempfile.gettempdir()) / "heybox_viewer_state.json"
+LOCK_FILE = Path(tempfile.gettempdir()) / "heybox_viewer.lock"
 POLL_INTERVAL = 0.5
 
 
@@ -93,10 +94,22 @@ class ImageViewer:
         # 键盘绑定
         self.root.bind("<Left>", lambda e: self._prev())
         self.root.bind("<Right>", lambda e: self._next())
-        self.root.bind("<Escape>", lambda e: self.root.destroy())
+        self.root.bind("<Escape>", lambda e: self._on_close())
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # 写锁文件标记进程存活
+        LOCK_FILE.write_text(str(os.getpid()), encoding="utf-8")
 
         # 用 root.after 做轮询，避免线程问题
         self._poll()
+
+    def _on_close(self) -> None:
+        """关闭窗口时清理锁文件"""
+        try:
+            LOCK_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+        self.root.destroy()
 
     # ─── 轮询 ───
 
