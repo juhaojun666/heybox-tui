@@ -26,7 +26,7 @@ python --version
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/你的用户名/heybox-tui.git
+git clone https://github.com/juhaojun666/heybox-tui.git
 cd heybox-tui
 ```
 
