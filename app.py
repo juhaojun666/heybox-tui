@@ -7,6 +7,7 @@
 快捷键:
   1/2  - 切换 推荐/最新
   n/p  - 下一页/上一页
+  ←/→  - 切换图片
   r    - 刷新
   Enter - 查看帖子详情
   Esc  - 返回列表
@@ -30,7 +31,7 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
 
 from client import HeyBoxClient, Post
-from config import get_credential, is_logged_in, save_config
+from config import is_logged_in
 
 # 与 viewer.py 共享的状态文件
 VIEWER_STATE_FILE = Path(tempfile.gettempdir()) / "heybox_viewer_state.json"
@@ -43,12 +44,25 @@ def _notify_viewer(post: Post) -> None:
         "originals": post.images,
         "title": post.title,
         "hash": hashlib.md5(post.id.encode()).hexdigest(),
+        "image_index": 0,
     }
     VIEWER_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
     # 检查 viewer 是否还在运行，不在则重启
     if post.images:
         _ensure_viewer_running()
+
+
+def _navigate_viewer(index: int) -> None:
+    """设置图片查看器当前索引"""
+    if not VIEWER_STATE_FILE.exists():
+        return
+    try:
+        state = json.loads(VIEWER_STATE_FILE.read_text(encoding="utf-8"))
+        state["image_index"] = index
+        VIEWER_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _ensure_viewer_running() -> None:
@@ -196,6 +210,8 @@ class HeyBoxApp(App):
         Binding("2", "tab_latest", "最新"),
         Binding("n", "next_page", "下一页"),
         Binding("p", "prev_page", "上一页"),
+        Binding("left", "prev_image", "上一张图"),
+        Binding("right", "next_image", "下一张图"),
         Binding("esc", "go_back", "返回"),
     ]
 
@@ -204,7 +220,6 @@ class HeyBoxApp(App):
 
     def __init__(self) -> None:
         super().__init__()
-        # 确保配置文件存在
         from config import load_config
         load_config()
         self.client = HeyBoxClient()
@@ -212,9 +227,47 @@ class HeyBoxApp(App):
         self._offset = 0
         self._page_size = 10
         self._current_post: Post | None = None
+        self._image_index: int = 0
 
     def on_mount(self) -> None:
         self.sub_title = f"heybox-tui {'[已登录]' if self.client.is_logged_in else '[未登录]'}"
+        self.query_one("#post-list", ListView).focus()
+        self._launch_viewer()
+
+    def _launch_viewer(self) -> None:
+        import subprocess
+        import sys
+        # 记录终端窗口句柄，viewer 启动后可能抢焦点
+        try:
+            import ctypes
+            self._terminal_hwnd = ctypes.windll.user32.GetForegroundWindow()
+        except Exception:
+            self._terminal_hwnd = None
+
+        viewer_path = Path(__file__).parent / "viewer.py"
+        if viewer_path.exists():
+            try:
+                subprocess.Popen(
+                    [sys.executable, str(viewer_path)],
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except Exception:
+                pass
+        # viewer 启动后抢回终端焦点
+        self.set_timer(1.0, self._reclaim_focus)
+
+    def _reclaim_focus(self) -> None:
+        """把操作系统焦点还给终端窗口"""
+        if self._terminal_hwnd:
+            try:
+                import ctypes
+                ctypes.windll.user32.SetForegroundWindow(self._terminal_hwnd)
+            except Exception:
+                pass
+        try:
+            self.query_one("#post-list", ListView).focus()
+        except Exception:
+            pass
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -229,11 +282,12 @@ class HeyBoxApp(App):
                     "快捷键:\n"
                     "  1/2    切换 推荐/最新\n"
                     "  n/p    下一页/上一页\n"
+                    "  ←/→    切换图片\n"
                     "  r      刷新\n"
                     "  Enter  查看详情\n"
                     "  Esc    返回列表\n"
                     "  q      退出\n\n"
-                    f"{'已登录 ✓' if self.client.is_logged_in else '未登录 — 编辑项目目录下 config.json 可获得个性化推荐'}",
+                    f"{'已登录 ✓' if self.client.is_logged_in else '未登录 — 编辑项目目录下 config.json 填入 cookie 可获得个性化推荐'}",
                     classes="placeholder",
                 )
         yield Footer()
@@ -267,6 +321,7 @@ class HeyBoxApp(App):
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, PostItem):
             self._current_post = event.item.post
+            self._image_index = 0
             self.query_one("#detail", PostDetail).show_post(event.item.post)
             _notify_viewer(event.item.post)
 
@@ -294,6 +349,20 @@ class HeyBoxApp(App):
 
     def action_go_back(self) -> None:
         self.query_one("#post-list", ListView).focus()
+
+    def action_prev_image(self) -> None:
+        if not self._current_post or not self._current_post.images:
+            return
+        count = len(self._current_post.images)
+        self._image_index = max(0, self._image_index - 1)
+        _navigate_viewer(self._image_index)
+
+    def action_next_image(self) -> None:
+        if not self._current_post or not self._current_post.images:
+            return
+        count = len(self._current_post.images)
+        self._image_index = min(count - 1, self._image_index + 1)
+        _navigate_viewer(self._image_index)
 
     @work(exclusive=True, thread=True)
     async def _load_posts(self, append: bool = False) -> None:
@@ -337,14 +406,10 @@ def main():
     import sys
     from pathlib import Path
 
-    # 自动启动图片查看器
-    viewer_path = Path(__file__).parent / "viewer.py"
-    if viewer_path.exists():
+    # 清除上次遗留的 viewer 状态，避免启动时显示旧图片
+    if VIEWER_STATE_FILE.exists():
         try:
-            subprocess.Popen(
-                [sys.executable, str(viewer_path)],
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            VIEWER_STATE_FILE.unlink()
         except Exception:
             pass
 

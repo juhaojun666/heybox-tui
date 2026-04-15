@@ -36,19 +36,33 @@ def load_state() -> dict:
         return {}
 
 
-def download_image(url: str) -> bytes | None:
-    try:
-        req = Request(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": "https://www.xiaoheihe.cn/",
-            },
-        )
-        with urlopen(req, timeout=10) as resp:
-            return resp.read()
-    except Exception:
-        return None
+def download_image(url: str, max_retries: int = 2) -> bytes | None:
+    for attempt in range(max_retries + 1):
+        try:
+            req = Request(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer": "https://www.xiaoheihe.cn/",
+                    "Origin": "https://www.xiaoheihe.cn",
+                },
+            )
+            import ssl
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with urlopen(req, timeout=15, context=ctx) as resp:
+                data = resp.read()
+                if len(data) < 100:
+                    # 可能返回了错误页面而非图片
+                    return None
+                return data
+        except Exception as e:
+            if attempt < max_retries:
+                import time
+                time.sleep(1 * (attempt + 1))
+            continue
+    return None
 
 
 def _cache_put(url: str, img) -> None:
@@ -119,7 +133,22 @@ class ImageViewer:
         # 写锁文件标记进程存活
         LOCK_FILE.write_text(str(os.getpid()), encoding="utf-8")
 
+        # 禁止窗口抢占焦点
+        self.root.after(50, self._set_no_activate)
+
         self._poll()
+
+    def _set_no_activate(self) -> None:
+        """设置窗口不抢占焦点"""
+        try:
+            import ctypes
+            hwnd = int(self.root.winfo_id())
+            GWL_EXSTYLE = -20
+            WS_EX_NOACTIVATE = 0x08000000
+            ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_NOACTIVATE)
+        except Exception:
+            pass
 
     def _on_close(self) -> None:
         try:
@@ -140,6 +169,13 @@ class ImageViewer:
                 self._originals = state.get("originals", self._images)
                 self._index = 0
                 self._show_current()
+
+            # 检测 TUI 传来的图片索引
+            target_index = state.get("image_index")
+            if target_index is not None and target_index != self._index:
+                if 0 <= target_index < len(self._images):
+                    self._index = target_index
+                    self._show_current()
         except Exception:
             pass
         self.root.after(int(POLL_INTERVAL * 1000), self._poll)
@@ -168,7 +204,7 @@ class ImageViewer:
         """子线程：下载 + PIL 缩放，传 Image 对象回主线程"""
         data = download_image(url)
         if data is None:
-            self.root.after(0, lambda: self._info_var.set("图片加载失败"))
+            self.root.after(0, lambda: self._on_fetch_fail(url))
             return
 
         try:
@@ -192,6 +228,10 @@ class ImageViewer:
             self.root.after(0, lambda: self._render_file(str(tmp)))
         except Exception:
             self.root.after(0, lambda: self._info_var.set("图片解码失败"))
+
+    def _on_fetch_fail(self, url: str) -> None:
+        """下载失败时标记并提示，可按→重试"""
+        self._info_var.set(f"❌ 加载失败 {self._index + 1}/{len(self._images)}  → 重试")
 
     def _render_pil(self, img) -> None:
         from PIL import ImageTk

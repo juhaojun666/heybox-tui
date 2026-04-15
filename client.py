@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import httpx
 import urllib3
 
-from config import get_credential
+from config import get_cookie
 from hkey import build_request_url
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -37,23 +37,22 @@ class HeyBoxClient:
     - feeds: 动态流 (pull=0 推荐, pull=1 最新, 支持分页)
     - topic_categories: 话题分类
 
-    登录后可获得个性化推荐，编辑项目目录下的 config.json：
-    - heybox_id: 小黑盒用户 ID
-    - pkey: 认证密钥
+    登录方式：在 config.json 中填入浏览器 cookie
     """
 
     def __init__(self) -> None:
-        cred = get_credential()
-        self._heybox_id = cred["heybox_id"]
-        self._pkey = cred["pkey"]
+        self._cookie = get_cookie()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://www.xiaoheihe.cn/",
+            "Origin": "https://www.xiaoheihe.cn",
+        }
+        if self._cookie:
+            headers["Cookie"] = self._cookie
         self._client = httpx.Client(
             timeout=15.0,
             verify=False,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://www.xiaoheihe.cn/",
-                "Origin": "https://www.xiaoheihe.cn",
-            },
+            headers=headers,
         )
         self._last_request_time = 0.0
         self._min_interval = 1.0
@@ -61,7 +60,7 @@ class HeyBoxClient:
 
     @property
     def is_logged_in(self) -> bool:
-        return bool(self._heybox_id and self._pkey)
+        return bool(self._cookie)
 
     def _throttle(self) -> None:
         elapsed = time.time() - self._last_request_time
@@ -70,9 +69,7 @@ class HeyBoxClient:
         self._last_request_time = time.time()
 
     def _get(self, route: str, params: dict | None = None) -> dict:
-        url = build_request_url(
-            route, params, heybox_id=self._heybox_id, pkey=self._pkey
-        )
+        url = build_request_url(route, params)
         last_error = None
         for attempt in range(self._max_retries):
             self._throttle()
@@ -180,9 +177,14 @@ def _to_original_url(url: str) -> str:
     """
     import re
     clean = url.split("?")[0]
+    # 匹配 .../hash/thumb.ext 或 .../hash/format.ext
     m = re.match(r"(https?://.+?/\w+)/(?:thumb|format)\.\w+", clean)
     if m:
         return m.group(1) + ".jpeg"
+    # 已经是原图格式（没有 thumb/format 中间路径）
+    m2 = re.match(r"(https?://.+?/\w+)\.\w+", clean)
+    if m2:
+        return clean
     return clean
 
 

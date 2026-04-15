@@ -170,9 +170,6 @@ BASE_PARAMS = {
 def build_request_url(
     route_name: str,
     custom_params: dict | None = None,
-    *,
-    heybox_id: str = "",
-    pkey: str = "",
 ) -> str:
     if route_name not in ROUTES:
         raise ValueError(
@@ -189,11 +186,6 @@ def build_request_url(
     all_params["hkey"] = hkey
     all_params["_time"] = timestamp
     all_params["nonce"] = nonce
-
-    if heybox_id:
-        all_params["heybox_id"] = heybox_id
-    if pkey:
-        all_params["pkey"] = pkey
 
     query = "&".join(f"{k}={v}" for k, v in all_params.items())
     return f"https://api.xiaoheihe.cn{route['path']}?{query}"
