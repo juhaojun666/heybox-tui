@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".heybox-tui"
+CONFIG_DIR = Path(__file__).parent
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 _DEFAULT_CONFIG = {

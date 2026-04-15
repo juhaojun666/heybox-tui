@@ -36,7 +36,7 @@ class HeyBoxClient:
     - feeds: 动态流 (pull=0 推荐, pull=1 最新, 支持分页)
     - topic_categories: 话题分类
 
-    登录后可获得个性化推荐，在 ~/.heybox-tui/config.json 中配置:
+    登录后可获得个性化推荐，编辑项目目录下的 config.json：
     - heybox_id: 小黑盒用户 ID
     - pkey: 认证密钥
     """

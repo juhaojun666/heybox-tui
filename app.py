@@ -232,7 +232,7 @@ class HeyBoxApp(App):
                     "  Enter  查看详情\n"
                     "  Esc    返回列表\n"
                     "  q      退出\n\n"
-                    f"{'已登录 ✓' if self.client.is_logged_in else '未登录 — 编辑 ~/.heybox-tui/config.json 可获得个性化推荐'}",
+                    f"{'已登录 ✓' if self.client.is_logged_in else '未登录 — 编辑项目目录下 config.json 可获得个性化推荐'}",
                     classes="placeholder",
                 )
         yield Footer()
