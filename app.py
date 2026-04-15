@@ -294,6 +294,21 @@ class HeyBoxApp(App):
 
 
 def main():
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    # 自动启动图片查看器
+    viewer_path = Path(__file__).parent / "viewer.py"
+    if viewer_path.exists():
+        try:
+            subprocess.Popen(
+                [sys.executable, str(viewer_path)],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception:
+            pass
+
     app = HeyBoxApp()
     app.run()
 
